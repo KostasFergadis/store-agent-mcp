@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "store-agent": {
+      "command": "uv",
+      "args": ["run", "--quiet", "store-agent-mcp"],
+      "env": {
+        "DATABASE_URL": "postgresql://store:store@localhost:5544/store",
+        "AGENT_ID": "claude-code"
+      }
+    }
+  }
+}

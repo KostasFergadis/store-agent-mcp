@@ -58,7 +58,7 @@ uv sync
 uv run store-agent-seed               # loads 31 products and computes their embeddings
 ```
 
-Embeddings come from a small local multilingual model (`paraphrase-multilingual-MiniLM-L12-v2` via fastembed), so Greek and English queries both work. No API key is needed, and product data never leaves the machine. The model was picked by the evals below.
+Embeddings come from a local multilingual model (`google/embeddinggemma-300m` via fastembed, 768 dimensions, 1.2 GB), so Greek and English queries both work. No API key is needed, and product data never leaves the machine. The model was picked by the evals below.
 
 **Connect it to Claude Code.** The repo ships a `.mcp.json`, so opening Claude Code in this folder offers the `store-agent` server. Or run it headless:
 
@@ -104,7 +104,7 @@ The first run, with the English-only `BAAI/bge-small-en-v1.5`, scored 17/20. It 
 |---|---|---|---|
 | BAAI/bge-small-en-v1.5 (previous default) | 17/20 | 0.89 | 67 MB |
 | snowflake/snowflake-arctic-embed-s | 15/20 | 0.75 | 130 MB |
-| **paraphrase-multilingual-MiniLM-L12-v2** (now default) | **20/20** | 0.86 | 220 MB |
+| **paraphrase-multilingual-MiniLM-L12-v2** (chosen) | **20/20** | 0.86 | 220 MB |
 
 The multilingual model fixes all three misses. In exchange, the best product sometimes comes second rather than first (lower MRR), and the model is about three times larger. For a Greek store, Greek queries working matters more. It has the same 384 dimensions, so the schema didn't change; re-run `uv run store-agent-seed` after switching.
 
@@ -120,7 +120,23 @@ What fixed most of them, and what didn't:
 
 [`evals/holdout_cases.json`](evals/holdout_cases.json) was written before any of these changes and never tuned against, so it shows whether a gain carries over to new queries (`--cases evals/holdout_cases.json`). Tags helped a little. They also showed why diet queries fail: embeddings ignore negation, so tagging chicken "not vegetarian" pulled it *towards* "vegetarian dinner". Exclusion is now a `diet` column and filter instead, and the tool description tells the agent to set it. In the evals, a case's `diet` field stands in for the agent setting the filter, so those cases measure search given the right filter, not whether the agent picks it. The remaining misses ("salad dressing", "what goes in a horiatiki", "υλικά για τζατζίκι") are recipe questions the small model doesn't connect to ingredients.
 
-Twenty cases is a small set I wrote myself. The next step is to add real queries from users as they come in. The command exits 1 below a 90% pass rate (`--min-pass-rate`, 0 to never fail), so it can run in CI on every change to the model or the embedded text.
+### Larger models
+
+To fix those, I scored five multilingual models on both sets. Each one used the query and document prefixes its model card asks for (fastembed doesn't add them):
+
+| Model | Dim | Size | Main set (20) | Held-out set (10) |
+|---|---|---|---|---|
+| paraphrase-multilingual-MiniLM-L12-v2 (previous default) | 384 | 0.22 GB | 18, MRR 0.88, P@3 0.89 | 6, MRR 0.62, P@3 0.40 |
+| paraphrase-multilingual-mpnet-base-v2 | 768 | 1.0 GB | 19, MRR 0.87, P@3 0.82 | 8, MRR 0.72, P@3 0.55 |
+| intfloat/multilingual-e5-large | 1024 | 2.24 GB | 19, **MRR 0.96**, P@3 0.86 | 9, **MRR 0.91**, P@3 0.70 |
+| Qwen/Qwen3-Embedding-0.6B (int8) | 1024 | 1.12 GB | 19, MRR 0.90, P@3 0.83 | 9, **MRR 0.91**, P@3 0.63 |
+| **google/embeddinggemma-300m** (now default) | 768 | 1.24 GB | **20**, MRR 0.93, **P@3 0.93** | 9, MRR 0.86, **P@3 0.75** |
+
+Every larger model does better on the held-out set, which is the clearest signal. EmbeddingGemma is the only one that passes all 20 main cases and has the best precision on both sets, and it embeds about 3× faster than e5-large and 6× faster than Qwen. With sets this small, a one-case difference is noise, so the choice between the top three is close. Its one miss is "χορτοφαγικό φαγητό" (vegetarian food). It is released under the Gemma Terms of Use rather than an OSI licence; e5-large (MIT) is the closest alternative if that matters.
+
+Switching changed the vector size from 384 to 768: run `db/migrations/002_embedding_768.sql`, then `uv run store-agent-seed`. The seed keeps live prices and stock.
+
+Twenty cases is a small set I wrote myself. The next step is to add real queries from users as they come in. The command exits 1 below a 90% pass rate (`--min-pass-rate`, 0 to never fail), so it can run in CI on every change to the model or the embedded text. `--model` scores any other fastembed model without changing the default.
 
 ## Project layout
 

@@ -11,7 +11,7 @@ import re
 from collections.abc import Sequence
 from typing import Protocol
 
-DIM = 384
+DIM = 768  # must match vector(...) in db/schema.sql; changing it needs a migration
 
 
 class Embedder(Protocol):
@@ -19,13 +19,25 @@ class Embedder(Protocol):
         """Embed documents (product texts)."""
 
     def embed_query(self, text: str) -> list[float]:
-        """Embed a search query. Retrieval models like bge embed queries differently from documents."""
+        """Embed a search query. Retrieval models embed queries differently from documents."""
 
 
 # Multilingual, so Greek queries ("ψάρι για τη σχάρα") work as well as English.
-# Chosen by the search evals: 20/20 cases against 17/20 for BAAI/bge-small-en-v1.5
-# (run `uv run store-agent-evals`). Still 384 dimensions, so the schema is unchanged.
-DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+# Chosen by the search evals over four other multilingual models: 20/20 main and
+# 9/10 held-out, against 18/20 and 6/10 for the previous paraphrase-multilingual-MiniLM
+# (see the README). Released under the Gemma Terms of Use, not an OSI licence.
+DEFAULT_MODEL = "google/embeddinggemma-300m"
+
+# Some models are trained with a task prefix on each side and score much worse without
+# one. fastembed doesn't add them, so we do. (query prefix, document prefix)
+_PREFIXES = {
+    "google/embeddinggemma-300m": ("task: search result | query: ", "title: none | text: "),
+    "intfloat/multilingual-e5-large": ("query: ", "passage: "),
+}
+
+
+def prefixes(model: str) -> tuple[str, str]:
+    return _PREFIXES.get(model, ("", ""))
 
 
 class FastEmbedder:
@@ -33,12 +45,13 @@ class FastEmbedder:
         from fastembed import TextEmbedding  # heavy import, only when used
 
         self._model = TextEmbedding(model)
+        self._query_prefix, self._doc_prefix = prefixes(model)
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        return [[float(x) for x in v] for v in self._model.embed(list(texts))]
+        return [[float(x) for x in v] for v in self._model.embed([self._doc_prefix + t for t in texts])]
 
     def embed_query(self, text: str) -> list[float]:
-        return [float(x) for x in next(iter(self._model.query_embed(text)))]
+        return [float(x) for x in next(iter(self._model.embed([self._query_prefix + text])))]
 
 
 class FakeEmbedder:

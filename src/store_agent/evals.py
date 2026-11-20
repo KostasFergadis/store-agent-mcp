@@ -12,7 +12,7 @@ products, ranking by exact cosine similarity gives the same order the HNSW
 index would.
 
     uv run store-agent-evals
-    uv run store-agent-evals --model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    uv run store-agent-evals --model intfloat/multilingual-e5-large
 """
 
 import argparse

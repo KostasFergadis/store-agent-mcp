@@ -1,6 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- Product catalog. `embedding` holds a 384-dim sentence embedding of
+-- Product catalog. `embedding` holds a 768-dim sentence embedding of
 -- name + category + description, used for semantic search.
 CREATE TABLE products (
     id          bigserial PRIMARY KEY,
@@ -13,7 +13,7 @@ CREATE TABLE products (
     -- Diet flags the agent can filter on. Embeddings can't express "no meat",
     -- so exclusion is a filter, not part of the search text.
     diet        text[] NOT NULL DEFAULT '{}' CHECK (diet <@ ARRAY['vegan', 'vegetarian', 'dairy-free']),
-    embedding   vector(384),
+    embedding   vector(768),
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
 

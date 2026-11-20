@@ -136,6 +136,23 @@ Every larger model does better on the held-out set, which is the clearest signal
 
 Switching changed the vector size from 384 to 768: run `db/migrations/002_embedding_768.sql`, then `uv run store-agent-seed`. The seed keeps live prices and stock.
 
+### A small, open-source option
+
+EmbeddingGemma's licence and size matter if the server runs on a small box in each store, or if only OSI-licensed models are allowed. The open-source models fastembed ships that are smaller than EmbeddingGemma, scored on both sets:
+
+| Model | Licence | Dim | Size | Main set (20) | Held-out set (10) | Per query |
+|---|---|---|---|---|---|---|
+| google/embeddinggemma-300m (default) | Gemma | 768 | 1.24 GB | 20, MRR 0.93, P@3 0.93 | 9, MRR 0.86, P@3 0.75 | not measured |
+| **minishlab/potion-multilingual-128M** | MIT | 256 | 0.51 GB | 19, MRR 0.91, P@3 0.87 | **9**, MRR 0.91, P@3 0.62 | **0.04 ms** |
+| paraphrase-multilingual-mpnet-base-v2 | Apache-2.0 | 768 | 1.0 GB | 19, MRR 0.87, P@3 0.82 | 8, MRR 0.72, P@3 0.55 | not measured |
+| paraphrase-multilingual-MiniLM-L12-v2 | Apache-2.0 | 384 | 0.22 GB | 18, MRR 0.88, P@3 0.89 | 6, MRR 0.62, P@3 0.40 | 5.3 ms |
+
+Per-query time is one query embedded on a laptop CPU, averaged over 50 runs.
+
+`potion-multilingual-128M` is a static model: it looks up a stored vector for each token and averages them instead of running a transformer. That makes it about 100× faster than MiniLM and small enough for any in-store machine, and it matches EmbeddingGemma on the held-out set. The cost is that it ignores word order and context. It missed "τυρί για χωριάτικη σαλάτα" (cheese for a horiatiki, feta not in the top 3) and returned the souvlaki itself for "dip to serve with souvlaki". It also has fewer good products in its top 3 on the held-out set (P@3 0.62 against 0.75).
+
+So the choice depends on where search runs. On a central server where the Gemma licence is acceptable, keep EmbeddingGemma. On edge hardware, or where only open-source licences are allowed, use potion; `intfloat/multilingual-e5-large` (MIT) is the higher-quality open option if size doesn't matter. To score potion yourself: `uv run store-agent-evals --model minishlab/potion-multilingual-128M`. Making it the default would need `DEFAULT_MODEL` and `DIM = 256` in `embeddings.py`, a migration to `vector(256)` like `002_embedding_768.sql`, and a re-seed.
+
 Twenty cases is a small set I wrote myself. The next step is to add real queries from users as they come in. The command exits 1 below a 90% pass rate (`--min-pass-rate`, 0 to never fail), so it can run in CI on every change to the model or the embedded text. `--model` scores any other fastembed model without changing the default.
 
 ## Project layout

@@ -11,7 +11,7 @@ from psycopg import Connection, errors, sql
 
 from .embeddings import Embedder, to_pgvector
 
-MAX_PRICE = Decimal("100000")
+MAX_PRICE = Decimal(100000)
 
 
 class ToolError(Exception):
@@ -89,6 +89,13 @@ def get_product(conn: Connection, sku: str) -> dict:
     if row is None:
         raise NotFound(f"no product with sku {sku!r}")
     return _plain(row)
+
+
+def list_products(conn: Connection) -> list[dict]:
+    rows = conn.execute(
+        "SELECT sku, name, category, price, stock, updated_at FROM products ORDER BY category, name"
+    ).fetchall()
+    return [_plain(r) for r in rows]
 
 
 # --- price changes: the agent proposes, a human decides ----------------------

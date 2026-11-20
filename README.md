@@ -30,9 +30,13 @@ flowchart LR
 
 There is deliberately no tool that changes a price. A test checks that none ever gets added.
 
-**Human side (FastAPI, docs at `http://localhost:8088/docs`)**
+**Human side (FastAPI)**
 
-`GET /requests`, `POST /requests/{id}/approve`, `POST /requests/{id}/reject`, `GET /audit`, `GET /audit/verify`
+An approver console at `http://localhost:8088/`: pending requests shown as shelf tags with the agent's reason, approve or reject with a note, current shelf prices, and the audit log with a one-click integrity check. It is a single HTML file with no build step, and it calls the same API as anything else (`/docs` lists the endpoints):
+
+`GET /requests`, `POST /requests/{id}/approve`, `POST /requests/{id}/reject`, `GET /products`, `GET /audit`, `GET /audit/verify`
+
+Everything the agent writes (reasons, product names) is escaped before it reaches the page, since a reason is untrusted text.
 
 ## Guardrails
 
@@ -63,7 +67,7 @@ claude -p "Find what a customer needs for a Greek salad and propose 10% off the 
   --mcp-config .mcp.json --strict-mcp-config --allowedTools "mcp__store-agent__*"
 ```
 
-**Then approve as a human:**
+**Then approve as a human:** open `http://localhost:8088/`, enter the approver key (`dev-approver-key` locally) and your name. Or with curl:
 
 ```bash
 curl -H 'X-API-Key: dev-approver-key' localhost:8088/requests
@@ -80,7 +84,7 @@ To serve MCP over HTTP instead of stdio, use `uv run store-agent-mcp --http --po
 uv run pytest
 ```
 
-26 tests run against the real Postgres from docker compose, in a separate `store_test` database. They go through the actual MCP layer (`MCPServer.call_tool`) and the FastAPI app, not mocks. They cover the approval rules, the audit chain (including detecting an edited and a deleted row), and the full agent → human → agent loop.
+28 tests run against the real Postgres from docker compose, in a separate `store_test` database. They go through the actual MCP layer (`MCPServer.call_tool`) and the FastAPI app, not mocks. They cover the approval rules, the audit chain (including detecting an edited and a deleted row), and the full agent → human → agent loop.
 
 One of them came out of the first end-to-end run with Claude. The agent called `search_products` seven times in parallel, and several of those calls each loaded the embedding model because none had finished loading yet. The model now loads once behind a lock, and the test fails if that ever regresses.
 
@@ -91,6 +95,7 @@ src/store_agent/
   tools.py          business logic, no MCP or HTTP; testable on its own
   mcp_server.py     MCP tools plus the audit wrapper
   approvals_api.py  FastAPI service for human decisions
+  static/console.html  approver console served at /
   audit.py          hash-chained audit log and verification
   embeddings.py     local embedding model, plus a deterministic fake for tests
   seed.py           loads data/products.json

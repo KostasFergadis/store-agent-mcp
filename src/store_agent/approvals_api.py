@@ -11,9 +11,11 @@ field in the request body.
 
 import secrets
 from contextlib import asynccontextmanager
+from importlib.resources import files
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from psycopg import Connection
 from pydantic import BaseModel, Field
 
@@ -58,6 +60,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         status = 404 if isinstance(e, tools.NotFound) else 409 if isinstance(e, tools.Conflict) else 400
         return HTTPException(status, str(e))
 
+    console = files(__package__).joinpath("static/console.html").read_text(encoding="utf-8")
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    def approver_console():
+        # The page itself is public; every call it makes still needs the API key.
+        return console
+
     @app.get("/health")
     def health(c: Conn):
         c.execute("SELECT 1")
@@ -66,6 +75,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/requests", dependencies=auth)
     def list_requests(c: Conn, status: Literal["pending", "approved", "rejected"] | None = "pending"):
         return tools.list_requests(c, status)
+
+    @app.get("/products", dependencies=auth)
+    def list_products(c: Conn):
+        return tools.list_products(c)
 
     def decide(request_id: int, body: Decision, approve: bool, c) -> dict:
         tool = "approve_request" if approve else "reject_request"

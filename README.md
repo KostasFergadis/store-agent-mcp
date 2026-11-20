@@ -58,7 +58,7 @@ uv sync
 uv run store-agent-seed               # loads 31 products and computes their embeddings
 ```
 
-Embeddings come from a small local model (`BAAI/bge-small-en-v1.5` via fastembed). No API key is needed, and product data never leaves the machine.
+Embeddings come from a small local multilingual model (`paraphrase-multilingual-MiniLM-L12-v2` via fastembed), so Greek and English queries both work. No API key is needed, and product data never leaves the machine. The model was picked by the evals below.
 
 **Connect it to Claude Code.** The repo ships a `.mcp.json`, so opening Claude Code in this folder offers the `store-agent` server. Or run it headless:
 
@@ -84,9 +84,31 @@ To serve MCP over HTTP instead of stdio, use `uv run store-agent-mcp --http --po
 uv run pytest
 ```
 
-28 tests run against the real Postgres from docker compose, in a separate `store_test` database. They go through the actual MCP layer (`MCPServer.call_tool`) and the FastAPI app, not mocks. They cover the approval rules, the audit chain (including detecting an edited and a deleted row), and the full agent → human → agent loop.
+30 tests run against the real Postgres from docker compose, in a separate `store_test` database. They go through the actual MCP layer (`MCPServer.call_tool`) and the FastAPI app, not mocks. They cover the approval rules, the audit chain (including detecting an edited and a deleted row), and the full agent → human → agent loop.
 
 One of them came out of the first end-to-end run with Claude. The agent called `search_products` seven times in parallel, and several of those calls each loaded the embedding model because none had finished loading yet. The model now loads once behind a lock, and the test fails if that ever regresses.
+
+## Evals
+
+Tests check that the code does what it should. Evals check that the model does: whether a search returns what a person would expect.
+
+```bash
+uv run store-agent-evals
+```
+
+[`evals/search_cases.json`](evals/search_cases.json) has 20 queries, in English and Greek. Each one lists the products that count as a good answer, and some list products that must not appear near the top. A case passes when one of the expected products is in the top 3 and none of the forbidden ones are. MRR (mean reciprocal rank) adds how high the first good product sits. The run needs no database: it embeds `data/products.json` in memory with the same text the seed uses.
+
+The first run, with the English-only `BAAI/bge-small-en-v1.5`, scored 17/20. It returned spaghetti first for "something for breakfast", and missed "ψάρι για τη σχάρα" (fish for the grill) and "ελαιόλαδο" (olive oil). I compared two other 384-dimension models that fastembed ships:
+
+| Model | Passed | MRR | Size |
+|---|---|---|---|
+| BAAI/bge-small-en-v1.5 (previous default) | 17/20 | 0.89 | 67 MB |
+| snowflake/snowflake-arctic-embed-s | 15/20 | 0.75 | 130 MB |
+| **paraphrase-multilingual-MiniLM-L12-v2** (now default) | **20/20** | 0.86 | 220 MB |
+
+The multilingual model fixes all three misses. In exchange, the best product sometimes comes second rather than first (lower MRR), and the model is about three times larger. For a Greek store, Greek queries working matters more. It has the same 384 dimensions, so the schema didn't change; re-run `uv run store-agent-seed` after switching.
+
+Twenty cases is a small set I wrote myself, so 20/20 means "no known misses", not "perfect". The next step is to add real queries from users as they come in. `--min-pass-rate 0.9` makes the command fail below 90%, so it can run in CI on every change to the model or the embedded text.
 
 ## Project layout
 
@@ -99,6 +121,7 @@ src/store_agent/
   audit.py          hash-chained audit log and verification
   embeddings.py     local embedding model, plus a deterministic fake for tests
   seed.py           loads data/products.json
+  evals.py          scores search quality against evals/search_cases.json
 db/schema.sql       tables, constraints, HNSW index
 ```
 
@@ -106,6 +129,6 @@ db/schema.sql       tables, constraints, HNSW index
 
 - **Approver identity** is a shared API key plus a name in the request body. A real setup would use SSO/OIDC, so the approver is whoever actually logged in.
 - **The audit chain** catches edits by someone who doesn't rewrite every later row. To catch a full rewrite, the latest hash should be copied periodically somewhere the database admin can't write.
-- **Evals:** a small set of scripted tasks ("find vegan protein options", "propose a discount with no reason") scored automatically, to catch regressions when tool descriptions or models change. For example, the small local model currently ranks spaghetti first for "something for breakfast". Evals would make misses like that measurable, so that changing the model or the embedded text is a decision based on numbers.
+- **Agent evals:** the evals above score search only. The next layer is scripted agent tasks ("propose a discount with no reason" should be refused, "find vegan protein" should call search before answering), run through `claude -p` and scored on which tools were called and what the final answer says.
 - **Edge deployment:** the MCP server and model are small enough to run on a single in-store box (k3s) against a local Postgres, syncing with the central catalog.
 - **Agent-to-agent:** for example a pricing agent that proposes and a separate checker agent that reviews before a human sees it.

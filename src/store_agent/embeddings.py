@@ -22,8 +22,14 @@ class Embedder(Protocol):
         """Embed a search query. Retrieval models like bge embed queries differently from documents."""
 
 
+# Multilingual, so Greek queries ("ψάρι για τη σχάρα") work as well as English.
+# Chosen by the search evals: 20/20 cases against 17/20 for BAAI/bge-small-en-v1.5
+# (run `uv run store-agent-evals`). Still 384 dimensions, so the schema is unchanged.
+DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+
 class FastEmbedder:
-    def __init__(self, model: str = "BAAI/bge-small-en-v1.5"):
+    def __init__(self, model: str = DEFAULT_MODEL):
         from fastembed import TextEmbedding  # heavy import, only when used
 
         self._model = TextEmbedding(model)

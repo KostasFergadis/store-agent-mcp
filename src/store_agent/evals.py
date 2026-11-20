@@ -19,7 +19,7 @@ import argparse
 import json
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .embeddings import Embedder, FastEmbedder
@@ -36,6 +36,7 @@ class CaseResult:
     expect: list[str]
     must_not: list[str]
     note: str = ""
+    diet: list[str] = field(default_factory=list)
 
     @property
     def hit(self) -> bool:
@@ -48,6 +49,12 @@ class CaseResult:
     @property
     def passed(self) -> bool:
         return self.hit and not self.bad
+
+    @property
+    def precision(self) -> float:
+        """Share of the top 3 that are good, out of as many good products as exist (at most 3)."""
+        good = sum(sku in self.expect for sku in self.top[:TOP_K])
+        return good / min(TOP_K, len(self.expect))
 
     @property
     def reciprocal_rank(self) -> float:
@@ -66,10 +73,14 @@ def _cosine(a: list[float], b: list[float]) -> float:
 def run(cases: list[dict], products: list[dict], embedder: Embedder) -> list[CaseResult]:
     skus = [p["sku"] for p in products]
     doc_vecs = embedder.embed([embedding_text(p) for p in products])
+    diets = [set(p.get("diet", [])) for p in products]
     results = []
     for case in cases:
         q = embedder.embed_query(case["query"])
-        ranked = sorted(zip(skus, doc_vecs, strict=True), key=lambda sv: _cosine(q, sv[1]), reverse=True)
+        # A case's `diet` stands in for the filter the agent is told to set (see search_products).
+        wanted = set(case.get("diet", []))
+        pool = [(s, v) for s, v, d in zip(skus, doc_vecs, diets, strict=True) if wanted <= d]
+        ranked = sorted(pool, key=lambda sv: _cosine(q, sv[1]), reverse=True)
         results.append(
             CaseResult(
                 query=case["query"],
@@ -77,6 +88,7 @@ def run(cases: list[dict], products: list[dict], embedder: Embedder) -> list[Cas
                 expect=case["expect"],
                 must_not=case.get("must_not", []),
                 note=case.get("note", ""),
+                diet=case.get("diet", []),
             )
         )
     return results
@@ -89,6 +101,7 @@ def summary(results: list[CaseResult]) -> dict:
         "passed": sum(r.passed for r in results),
         "pass_rate": round(sum(r.passed for r in results) / n, 3) if n else 0.0,
         "mrr": round(sum(r.reciprocal_rank for r in results) / n, 3) if n else 0.0,
+        "precision_at_3": round(sum(r.precision for r in results) / n, 3) if n else 0.0,
     }
 
 
@@ -96,14 +109,19 @@ def report(results: list[CaseResult], names: dict[str, str], out=sys.stdout) -> 
     for r in results:
         mark = "PASS" if r.passed else "FAIL"
         top = ", ".join(names.get(s, s) for s in r.top[:TOP_K])
-        print(f"{mark}  {r.query!r}", file=out)
+        diet = f"  [diet: {', '.join(r.diet)}]" if r.diet else ""
+        print(f"{mark}  {r.query!r}{diet}", file=out)
         print(f"      top {TOP_K}: {top}", file=out)
         if not r.hit:
             print(f"      expected one of: {', '.join(names.get(s, s) for s in r.expect)}", file=out)
         if r.bad:
             print(f"      should not be here: {', '.join(names.get(s, s) for s in r.bad)}", file=out)
     s = summary(results)
-    print(f"\n{s['passed']}/{s['cases']} passed ({s['pass_rate']:.0%}), MRR {s['mrr']:.2f}", file=out)
+    print(
+        f"\n{s['passed']}/{s['cases']} passed ({s['pass_rate']:.0%}), "
+        f"MRR {s['mrr']:.2f}, precision@{TOP_K} {s['precision_at_3']:.2f}",
+        file=out,
+    )
 
 
 def main() -> None:
@@ -111,7 +129,7 @@ def main() -> None:
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES)
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
     parser.add_argument("--model", default=None, help="fastembed model name (default: the one the app uses)")
-    parser.add_argument("--min-pass-rate", type=float, default=0.0, help="exit 1 below this, for CI")
+    parser.add_argument("--min-pass-rate", type=float, default=0.9, help="exit 1 below this (0 to never fail)")
     parser.add_argument("--json", action="store_true", help="print the summary as JSON")
     args = parser.parse_args()
 

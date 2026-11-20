@@ -10,6 +10,9 @@ CREATE TABLE products (
     description text NOT NULL,
     price       numeric(10, 2) NOT NULL CHECK (price > 0),
     stock       integer NOT NULL CHECK (stock >= 0),
+    -- Diet flags the agent can filter on. Embeddings can't express "no meat",
+    -- so exclusion is a filter, not part of the search text.
+    diet        text[] NOT NULL DEFAULT '{}' CHECK (diet <@ ARRAY['vegan', 'vegetarian', 'dairy-free']),
     embedding   vector(384),
     updated_at  timestamptz NOT NULL DEFAULT now()
 );

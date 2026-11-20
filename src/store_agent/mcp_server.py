@@ -90,14 +90,22 @@ def build_server(settings: Settings, pool: ConnectionPool, embedder: Embedder | 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     @audited
     def search_products(
-        query: str, limit: int = 5, max_price: float | None = None, in_stock_only: bool = False
+        query: str,
+        limit: int = 5,
+        max_price: float | None = None,
+        in_stock_only: bool = False,
+        diet: list[Literal["vegan", "vegetarian", "dairy-free"]] | None = None,
     ) -> list[dict[str, Any]]:
         """Semantic search over the catalog, e.g. "something for a greek salad" or "cheap breakfast".
+
+        Set `diet` whenever the user rules something out (vegan, vegetarian, dairy-free):
+        meaning-based search alone cannot exclude meat or dairy. Products must match every
+        diet given.
 
         Returns sku, name, category, price (EUR), stock and a similarity score (0-1).
         """
         with pool.connection() as conn:
-            return tools.search_products(conn, get_embedder(), query, limit, max_price, in_stock_only)
+            return tools.search_products(conn, get_embedder(), query, limit, max_price, in_stock_only, diet)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     @audited

@@ -12,6 +12,7 @@ from psycopg import Connection, errors, sql
 from .embeddings import Embedder, to_pgvector
 
 MAX_PRICE = Decimal(100000)
+DIETS = ("vegan", "vegetarian", "dairy-free")
 
 
 class ToolError(Exception):
@@ -61,9 +62,13 @@ def search_products(
     limit: int = 5,
     max_price: float | None = None,
     in_stock_only: bool = False,
+    diet: list[str] | None = None,
 ) -> list[dict]:
     if not query.strip():
         raise ToolError("query must not be empty")
+    diet = list(diet or [])
+    if unknown := [d for d in diet if d not in DIETS]:
+        raise ToolError(f"unknown diet {', '.join(unknown)}; use any of {', '.join(DIETS)}")
     limit = max(1, min(int(limit), 20))
     vec = to_pgvector(embedder.embed_query(query))
     rows = conn.execute(
@@ -73,17 +78,18 @@ def search_products(
         FROM products
         WHERE (%(max_price)s::numeric IS NULL OR price <= %(max_price)s::numeric)
           AND (NOT %(in_stock)s OR stock > 0)
+          AND diet @> %(diet)s::text[]
         ORDER BY embedding <=> %(v)s::vector
         LIMIT %(limit)s
         """,
-        {"v": vec, "max_price": max_price, "in_stock": in_stock_only, "limit": limit},
+        {"v": vec, "max_price": max_price, "in_stock": in_stock_only, "diet": diet, "limit": limit},
     ).fetchall()
     return [_plain(r) for r in rows]
 
 
 def get_product(conn: Connection, sku: str) -> dict:
     row = conn.execute(
-        "SELECT sku, name, category, description, price, stock, updated_at FROM products WHERE sku = %s",
+        "SELECT sku, name, category, description, price, stock, diet, updated_at FROM products WHERE sku = %s",
         (sku,),
     ).fetchone()
     if row is None:

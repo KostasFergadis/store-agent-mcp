@@ -1,4 +1,8 @@
-"""Load data/products.json into Postgres with embeddings. Safe to re-run (upserts by sku)."""
+"""Load data/products.json into Postgres with embeddings.
+
+Safe to re-run: existing products get new names, descriptions, diet flags and embeddings,
+but keep their live price and stock.
+"""
 
 import argparse
 import json
@@ -14,7 +18,9 @@ DEFAULT_DATA = Path(__file__).resolve().parents[2] / "data" / "products.json"
 
 
 def embedding_text(p: dict) -> str:
-    return f"{p['name']}. {p['category']}. {p['description']}"
+    # Tags (diet, dishes, Greek name) are embedded for search but not stored as a column.
+    text = f"{p['name']}. {p['category']}. {p['description']}"
+    return f"{text} {p['tags']}" if p.get("tags") else text
 
 
 def seed(conn: psycopg.Connection, products: list[dict], embedder) -> int:
@@ -23,14 +29,19 @@ def seed(conn: psycopg.Connection, products: list[dict], embedder) -> int:
         for p, v in zip(products, vectors, strict=True):
             conn.execute(
                 """
-                INSERT INTO products (sku, name, category, description, price, stock, embedding)
-                VALUES (%s, %s, %s, %s, %s, %s, %s::vector)
+                INSERT INTO products (sku, name, category, description, price, stock, diet, embedding)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
                 ON CONFLICT (sku) DO UPDATE SET
                     name = EXCLUDED.name, category = EXCLUDED.category,
-                    description = EXCLUDED.description, price = EXCLUDED.price,
-                    stock = EXCLUDED.stock, embedding = EXCLUDED.embedding, updated_at = now()
+                    description = EXCLUDED.description, diet = EXCLUDED.diet, embedding = EXCLUDED.embedding
+                -- price and stock only come from the file for new products. Existing prices
+                -- change through approval with an audit row, and a re-seed must not undo that.
+                -- updated_at is left alone too: it records the last price change.
                 """,
-                (p["sku"], p["name"], p["category"], p["description"], p["price"], p["stock"], to_pgvector(v)),
+                (
+                    p["sku"], p["name"], p["category"], p["description"], p["price"], p["stock"],
+                    p.get("diet", []), to_pgvector(v),
+                ),
             )
     return len(products)
 

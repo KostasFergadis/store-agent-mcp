@@ -32,3 +32,32 @@ def test_cases_only_reference_real_products():
         assert case["query"].strip()
         assert case["expect"], case["query"]
         assert set(case["expect"]) | set(case.get("must_not", [])) <= skus, case["query"]
+
+
+def test_precision_counts_good_products_in_top_k():
+    def result(top, expect):
+        return evals.CaseResult(query="q", top=top, expect=expect, must_not=[])
+
+    assert result(["A", "B", "C"], ["A", "B"]).precision == 1.0  # both good products, of 2 possible
+    assert result(["A", "X", "Y"], ["A", "B", "C", "D"]).precision == 1 / 3
+    assert result(["X", "Y", "A"], ["A"]).precision == 1.0  # only one good product exists
+    assert result(["X", "Y", "Z"], ["A"]).precision == 0.0
+
+
+def test_summary_reports_precision():
+    results = evals.run([{"query": "breakfast porridge", "expect": ["A"]}], PRODUCTS, FakeEmbedder())
+    assert evals.summary(results)["precision_at_3"] == 1.0
+
+
+def test_embedding_text_includes_tags_when_present():
+    from store_agent.seed import embedding_text
+
+    p = {"name": "Red Lentils", "category": "Pantry", "description": "For soup."}
+    assert embedding_text(p) == "Red Lentils. Pantry. For soup."
+    assert embedding_text({**p, "tags": "vegan, plant protein"}) == "Red Lentils. Pantry. For soup. vegan, plant protein"
+
+
+def test_case_diet_filters_candidates():
+    products = [{**p, "diet": ["vegan"] if p["sku"] == "B" else []} for p in PRODUCTS]
+    [r] = evals.run([{"query": "breakfast porridge", "expect": ["B"], "diet": ["vegan"]}], products, FakeEmbedder())
+    assert r.top == ["B"]

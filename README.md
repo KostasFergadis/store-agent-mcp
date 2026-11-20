@@ -22,7 +22,7 @@ flowchart LR
 
 | Tool | What it does |
 |---|---|
-| `search_products` | Semantic search with pgvector ("something for a greek salad"), with price and stock filters |
+| `search_products` | Semantic search with pgvector ("something for a greek salad"), with price, stock and diet (vegan, vegetarian, dairy-free) filters |
 | `get_product` | Full product details |
 | `request_price_change` | Creates a *pending* request with a reason. Does not touch the price |
 | `get_price_change_request` | Lets the agent see whether its request was approved or rejected, and why |
@@ -84,7 +84,7 @@ To serve MCP over HTTP instead of stdio, use `uv run store-agent-mcp --http --po
 uv run pytest
 ```
 
-30 tests run against the real Postgres from docker compose, in a separate `store_test` database. They go through the actual MCP layer (`MCPServer.call_tool`) and the FastAPI app, not mocks. They cover the approval rules, the audit chain (including detecting an edited and a deleted row), and the full agent → human → agent loop.
+39 tests run against the real Postgres from docker compose, in a separate `store_test` database. They go through the actual MCP layer (`MCPServer.call_tool`) and the FastAPI app, not mocks. They cover the approval rules, the audit chain (including detecting an edited and a deleted row), and the full agent → human → agent loop.
 
 One of them came out of the first end-to-end run with Claude. The agent called `search_products` seven times in parallel, and several of those calls each loaded the embedding model because none had finished loading yet. The model now loads once behind a lock, and the test fails if that ever regresses.
 
@@ -96,7 +96,7 @@ Tests check that the code does what it should. Evals check that the model does: 
 uv run store-agent-evals
 ```
 
-[`evals/search_cases.json`](evals/search_cases.json) has 20 queries, in English and Greek. Each one lists the products that count as a good answer, and some list products that must not appear near the top. A case passes when one of the expected products is in the top 3 and none of the forbidden ones are. MRR (mean reciprocal rank) adds how high the first good product sits. The run needs no database: it embeds `data/products.json` in memory with the same text the seed uses.
+[`evals/search_cases.json`](evals/search_cases.json) has 20 queries, in English and Greek. Each one lists the products that count as a good answer, and some list products that must not appear near the top. A case passes when one of the expected products is in the top 3 and none of the forbidden ones are. MRR (mean reciprocal rank) adds how high the first good product sits, and precision@3 adds how many of the top 3 are good (out of as many good products as the case lists, up to 3). The run needs no database: it embeds `data/products.json` in memory with the same text the seed uses.
 
 The first run, with the English-only `BAAI/bge-small-en-v1.5`, scored 17/20. It returned spaghetti first for "something for breakfast", and missed "ψάρι για τη σχάρα" (fish for the grill) and "ελαιόλαδο" (olive oil). I compared two other 384-dimension models that fastembed ships:
 
@@ -108,7 +108,19 @@ The first run, with the English-only `BAAI/bge-small-en-v1.5`, scored 17/20. It 
 
 The multilingual model fixes all three misses. In exchange, the best product sometimes comes second rather than first (lower MRR), and the model is about three times larger. For a Greek store, Greek queries working matters more. It has the same 384 dimensions, so the schema didn't change; re-run `uv run store-agent-seed` after switching.
 
-Twenty cases is a small set I wrote myself, so 20/20 means "no known misses", not "perfect". The next step is to add real queries from users as they come in. `--min-pass-rate 0.9` makes the command fail below 90%, so it can run in CI on every change to the model or the embedded text.
+The table above was scored before most cases had `must_not` lists. Passing only needs one good product in the top 3, so a result like chicken first for "vegan protein" still passed. With products that are clearly wrong now forbidden (meat and dairy for vegan, spaghetti for a Greek salad, orzo for tzatziki, bananas for spanakopita), the current model scores **16/20, MRR 0.86, precision@3 0.83**. The four failures were recipe-style English queries.
+
+What fixed most of them, and what didn't:
+
+| Change | Main set (20) | Held-out set (10) |
+|---|---|---|
+| Stricter cases, no changes | 16/20, MRR 0.86, P@3 0.83 | 2/10, MRR 0.28, P@3 0.20 |
+| Tags in the embedded text (diet, dishes, Greek name) | 17/20, MRR 0.88, P@3 0.89 | 3/10, MRR 0.43, P@3 0.27 |
+| Plus a `diet` filter on search | **18/20**, MRR 0.88, P@3 0.89 | **6/10**, MRR 0.62, P@3 0.40 |
+
+[`evals/holdout_cases.json`](evals/holdout_cases.json) was written before any of these changes and never tuned against, so it shows whether a gain carries over to new queries (`--cases evals/holdout_cases.json`). Tags helped a little. They also showed why diet queries fail: embeddings ignore negation, so tagging chicken "not vegetarian" pulled it *towards* "vegetarian dinner". Exclusion is now a `diet` column and filter instead, and the tool description tells the agent to set it. In the evals, a case's `diet` field stands in for the agent setting the filter, so those cases measure search given the right filter, not whether the agent picks it. The remaining misses ("salad dressing", "what goes in a horiatiki", "υλικά για τζατζίκι") are recipe questions the small model doesn't connect to ingredients.
+
+Twenty cases is a small set I wrote myself. The next step is to add real queries from users as they come in. The command exits 1 below a 90% pass rate (`--min-pass-rate`, 0 to never fail), so it can run in CI on every change to the model or the embedded text.
 
 ## Project layout
 

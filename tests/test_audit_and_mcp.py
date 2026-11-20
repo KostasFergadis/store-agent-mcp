@@ -31,6 +31,14 @@ def test_every_tool_call_is_audited(settings, pool, embedder, conn):
     assert rows[1]["args"]["query"] == "olive oil"
 
 
+def test_mcp_search_accepts_diet_and_rejects_unknown(settings, pool, embedder):
+    server = build_server(settings, pool, embedder)
+    rows = call(server, "search_products", {"query": "dinner", "limit": 20, "diet": ["vegetarian"]})
+    assert rows and not any(r["category"] == "Meat & Fish" for r in rows)
+    with pytest.raises(ToolError):
+        call(server, "search_products", {"query": "dinner", "diet": ["keto"]})
+
+
 def test_mcp_exposes_no_way_to_approve(settings, pool, embedder):
     server = build_server(settings, pool, embedder)
     names = {t.name for t in asyncio.run(server.list_tools())}

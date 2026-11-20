@@ -4,7 +4,7 @@ from store_agent import tools
 
 
 def test_search_finds_relevant_product(conn, embedder):
-    results = tools.search_products(conn, embedder, "feta cheese for greek salad", limit=3)
+    results = tools.search_products(conn, embedder, "feta PDO cheese", limit=3)
     assert results[0]["sku"] == "DAI-002"
     assert 0 < results[0]["similarity"] <= 1
 
@@ -13,6 +13,25 @@ def test_search_filters(conn, embedder):
     results = tools.search_products(conn, embedder, "orange juice", limit=20, in_stock_only=True, max_price=2.0)
     assert all(r["stock"] > 0 and r["price"] <= 2.0 for r in results)
     assert "BEV-003" not in {r["sku"] for r in results}  # out of stock
+
+
+def test_search_diet_filter_excludes_meat_and_dairy(conn, embedder):
+    vegan = tools.search_products(conn, embedder, "protein", limit=20, diet=["vegan"])
+    skus = {r["sku"] for r in vegan}
+    assert {"PAN-006", "PAN-007"} <= skus
+    assert not skus & {"MEA-001", "MEA-002", "MEA-003", "DAI-001", "DAI-002", "PAN-003"}  # honey isn't vegan
+
+    veggie = {r["sku"] for r in tools.search_products(conn, embedder, "protein", limit=20, diet=["vegetarian"])}
+    assert "DAI-001" in veggie and not veggie & {"MEA-001", "MEA-002", "MEA-003"}
+
+
+def test_search_rejects_unknown_diet(conn, embedder):
+    with pytest.raises(tools.ToolError, match="keto"):
+        tools.search_products(conn, embedder, "bread", diet=["keto"])
+
+
+def test_get_product_includes_diet(conn):
+    assert set(tools.get_product(conn, "PAN-003")["diet"]) == {"vegetarian", "dairy-free"}
 
 
 def test_search_rejects_empty_query(conn, embedder):

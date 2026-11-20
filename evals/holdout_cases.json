@@ -1,0 +1,12 @@
+[
+  {"query": "vegetarian dinner", "diet": ["vegetarian"], "expect": ["PAN-006", "PAN-007", "PRO-007", "PAN-004"], "must_not": ["MEA-001", "MEA-002", "MEA-003"]},
+  {"query": "plant-based lunch", "diet": ["vegan"], "expect": ["PAN-006", "PAN-007"], "must_not": ["MEA-001", "MEA-002", "MEA-003", "DAI-001", "DAI-002", "DAI-004"]},
+  {"query": "dairy-free breakfast", "diet": ["dairy-free"], "expect": ["PAN-008", "BAK-002", "PRO-006", "BAK-001"], "must_not": ["DAI-001", "DAI-003", "DAI-005"]},
+  {"query": "what goes in a horiatiki", "expect": ["DAI-002", "PRO-001", "PRO-002", "PRO-003", "PRO-004", "PAN-002"], "must_not": ["PAN-005", "PAN-004"]},
+  {"query": "salad dressing", "expect": ["PAN-001", "PRO-005", "PAN-002"]},
+  {"query": "dip to serve with souvlaki", "expect": ["DAI-001", "PRO-002"], "must_not": ["PRO-006"]},
+  {"query": "high protein food that isn't meat", "diet": ["vegetarian"], "expect": ["DAI-001", "PAN-007", "PAN-006"], "must_not": ["MEA-001", "MEA-002", "MEA-003"]},
+  {"query": "ingredients for a cretan dakos", "expect": ["BAK-003", "PRO-001", "DAI-002", "PAN-001"], "must_not": ["PRO-006"]},
+  {"query": "χορτοφαγικό φαγητό", "diet": ["vegetarian"], "expect": ["PAN-006", "PAN-007", "PRO-007"], "must_not": ["MEA-001", "MEA-002", "MEA-003"], "note": "Greek: vegetarian food"},
+  {"query": "υλικά για τζατζίκι", "expect": ["DAI-001", "PRO-002", "PAN-001"], "must_not": ["PAN-004", "PAN-005"], "note": "Greek: tzatziki ingredients"}
+]

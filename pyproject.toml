@@ -3,6 +3,7 @@ name = "store-agent-mcp"
 version = "0.1.0"
 description = "An MCP server that lets an AI agent work with a retail catalog, with human approval for writes and a tamper-evident audit log."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=2.3,<3",

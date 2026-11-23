@@ -180,3 +180,7 @@ db/schema.sql       tables, constraints, HNSW index
 - **Agent-side audit is best effort.** If writing the audit row fails after a tool call, the call still succeeds and the failure is logged, so the agent isn't blocked by an audit outage. The price change request itself is still stored with `requested_by`, and human decisions are already atomic with their audit row. For stricter governance, `request_price_change` and its audit row should commit in one transaction, as approvals do.
 - **Edge deployment:** the MCP server could run on a single in-store box (k3s) against a local Postgres, syncing with the central catalog. There, `potion-multilingual-128M` (0.5 GB, see above) fits better than EmbeddingGemma.
 - **Agent-to-agent:** for example a pricing agent that proposes and a separate checker agent that reviews before a human sees it.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The default embedding model, EmbeddingGemma, has its own licence (Gemma Terms of Use).

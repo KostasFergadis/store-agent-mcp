@@ -65,7 +65,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def approver_console():
         # The page itself is public; every call it makes still needs the API key.
-        return console
+        # Other sites may not frame it, so a decision can't be clickjacked.
+        return HTMLResponse(console, headers={
+            "Content-Security-Policy": "frame-ancestors 'none'",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "no-referrer",
+        })
 
     @app.get("/health")
     def health(c: Conn):

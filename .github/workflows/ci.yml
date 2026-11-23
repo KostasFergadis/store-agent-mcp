@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: store
+          POSTGRES_PASSWORD: store
+          POSTGRES_DB: store
+        ports:
+          - 5544:5432
+        options: >-
+          --health-cmd "pg_isready -U store"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.9"  # same as the Dockerfile
+      - name: Install
+        run: uv sync --frozen
+      - name: Lint
+        run: uvx ruff@0.17.6 check .
+      - name: Tests
+        # Tests use a deterministic fake embedder, so no model is downloaded here.
+        run: uv run pytest -q

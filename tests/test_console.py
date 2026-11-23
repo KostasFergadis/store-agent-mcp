@@ -9,6 +9,7 @@ def test_console_page_is_served(settings, conn):
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     assert "Price approvals" in r.text
+    assert r.headers["x-frame-options"] == "DENY"
 
 
 def test_products_needs_key_and_lists_catalog(settings, conn):

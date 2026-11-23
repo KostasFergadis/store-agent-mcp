@@ -1,5 +1,7 @@
 # store-agent-mcp
 
+[![CI](https://github.com/KostasFergadis/store-agent-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/KostasFergadis/store-agent-mcp/actions/workflows/ci.yml)
+
 An MCP server that lets an AI agent (Claude Code, Claude Desktop, or any MCP client) work with a grocery store's product catalog, **without letting it change anything on its own.**
 
 The agent can search products by meaning and propose price changes. A person approves or rejects each proposal through a small FastAPI service. Every tool call and every human decision goes into a hash-chained audit log that shows if anyone edits or deletes a row.
@@ -84,7 +86,7 @@ To serve MCP over HTTP instead of stdio, use `uv run store-agent-mcp --http --po
 uv run pytest
 ```
 
-39 tests run against the real Postgres from docker compose, in a separate `store_test` database. They go through the actual MCP layer (`MCPServer.call_tool`) and the FastAPI app, not mocks. They cover the approval rules, the audit chain (including detecting an edited and a deleted row), and the full agent → human → agent loop.
+43 tests run against the real Postgres from docker compose, in a separate `store_test` database. They go through the actual MCP layer (`MCPServer.call_tool`) and the FastAPI app, not mocks. They cover the approval rules, the audit chain (including detecting an edited and a deleted row), and the full agent → human → agent loop.
 
 One of them came out of the first end-to-end run with Claude. The agent called `search_products` seven times in parallel, and several of those calls each loaded the embedding model because none had finished loading yet. The model now loads once behind a lock, and the test fails if that ever regresses.
 
@@ -175,5 +177,6 @@ db/schema.sql       tables, constraints, HNSW index
 - **Approver identity** is a shared API key plus a name in the request body. A real setup would use SSO/OIDC, so the approver is whoever actually logged in.
 - **The audit chain** catches edits by someone who doesn't rewrite every later row. To catch a full rewrite, the latest hash should be copied periodically somewhere the database admin can't write.
 - **Agent evals:** the evals above score search only. The next layer is scripted agent tasks ("propose a discount with no reason" should be refused, "find vegan protein" should call search before answering), run through `claude -p` and scored on which tools were called and what the final answer says.
-- **Edge deployment:** the MCP server and model are small enough to run on a single in-store box (k3s) against a local Postgres, syncing with the central catalog.
+- **Agent-side audit is best effort.** If writing the audit row fails after a tool call, the call still succeeds and the failure is logged, so the agent isn't blocked by an audit outage. The price change request itself is still stored with `requested_by`, and human decisions are already atomic with their audit row. For stricter governance, `request_price_change` and its audit row should commit in one transaction, as approvals do.
+- **Edge deployment:** the MCP server could run on a single in-store box (k3s) against a local Postgres, syncing with the central catalog. There, `potion-multilingual-128M` (0.5 GB, see above) fits better than EmbeddingGemma.
 - **Agent-to-agent:** for example a pricing agent that proposes and a separate checker agent that reviews before a human sees it.

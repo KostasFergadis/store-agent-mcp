@@ -90,6 +90,17 @@ uv run pytest
 
 One of them came out of the first end-to-end run with Claude. The agent called `search_products` seven times in parallel, and several of those calls each loaded the embedding model because none had finished loading yet. The model now loads once behind a lock, and the test fails if that ever regresses.
 
+### CI
+
+Every push and pull request runs [GitHub Actions](.github/workflows/ci.yml) on a clean Ubuntu runner:
+
+1. Starts Postgres 16 with pgvector as a service container.
+2. Installs the exact locked dependencies (`uv sync --frozen`).
+3. Lints with ruff, including its security (`S`), bug-risk (`B`), async and performance rules (set in `pyproject.toml`).
+4. Runs the 43 tests against that database.
+
+The evals don't run in CI yet, because they download the 1.2 GB embedding model. With a model cache they could, and `--min-pass-rate` already makes the command fail when search quality drops.
+
 ## Evals
 
 Tests check that the code does what it should. Evals check that the model does: whether a search returns what a person would expect.

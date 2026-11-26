@@ -86,7 +86,7 @@ To serve MCP over HTTP instead of stdio, use `uv run store-agent-mcp --http --po
 uv run pytest
 ```
 
-43 tests run against the real Postgres from docker compose, in a separate `store_test` database. They go through the actual MCP layer (`MCPServer.call_tool`) and the FastAPI app, not mocks. They cover the approval rules, the audit chain (including detecting an edited and a deleted row), and the full agent → human → agent loop.
+47 tests run against the real Postgres from docker compose, in a separate `store_test` database. They go through the actual MCP layer (`MCPServer.call_tool`) and the FastAPI app, not mocks. They cover the approval rules, the audit chain (including detecting an edited and a deleted row), and the full agent → human → agent loop. The agent loop in `agent.py` is tested with a scripted model, including one test that starts the real MCP server over stdio.
 
 One of them came out of the first end-to-end run with Claude. The agent called `search_products` seven times in parallel, and several of those calls each loaded the embedding model because none had finished loading yet. The model now loads once behind a lock, and the test fails if that ever regresses.
 
@@ -97,7 +97,7 @@ Every push and pull request runs [GitHub Actions](.github/workflows/ci.yml) on a
 1. Starts Postgres 16 with pgvector as a service container.
 2. Installs the exact locked dependencies (`uv sync --frozen`).
 3. Lints with ruff, including its security (`S`), bug-risk (`B`), async and performance rules (set in `pyproject.toml`).
-4. Runs the 43 tests against that database.
+4. Runs the 47 tests against that database.
 
 The evals don't run in CI yet, because they download the 1.2 GB embedding model. With a model cache they could, and `--min-pass-rate` already makes the command fail when search quality drops.
 
@@ -168,12 +168,36 @@ So the choice depends on where search runs. On a central server where the Gemma 
 
 Twenty cases is a small set I wrote myself. The next step is to add real queries from users as they come in. The command exits 1 below a 90% pass rate (`--min-pass-rate`, 0 to never fail), so it can run in CI on every change to the model or the embedded text. `--model` scores any other fastembed model without changing the default.
 
+## A hand-written agent
+
+Claude Code is one way to drive the tools. `agent.py` is the other: the agent loop written out by hand. The loop itself (`run_agent`) is about 25 lines. It starts this MCP server over stdio, gives its tools to a local model through [Ollama](https://ollama.com), and repeats until the model answers:
+
+1. send the conversation and the tool list to the model
+2. if it asks for a tool, call it through MCP and add the result to the conversation
+3. stop when it answers without a tool call, or after 8 steps
+
+```bash
+ollama pull qwen3:8b
+uv run store-agent-chat "Propose 10% off the feta for a summer promo."
+```
+
+It prints each tool call as it happens. The agent has no extra powers: it gets the same tools as any MCP client, so it can only propose prices, and its calls are audited as `local-agent`. Tool errors go back to the model as text, so it can correct itself. The step limit stops a model that keeps calling tools.
+
+**What the first real runs showed** (qwen3:8b on a laptop):
+
+- Asked to propose 10% off the feta, the model didn't search. It called `request_price_change` with sku `"feta"` and a made-up price of €5.50. The server refused the unknown SKU, so nothing bad was stored, but the model gave up instead of searching.
+- Asked what a Greek salad needs, it searched once, listed spinach and missed feta and olives.
+- After adding three rules to the system prompt (look products up before using a SKU or price, search each ingredient separately, retry after an error), the feta run searched first, found €4.99 and proposed €4.49. The salad question has not been re-run since.
+
+The fix was in the prompt, but the guardrails are what made the first failure harmless: the server checks the SKU and reads the current price itself, and a person approves every change. Each run took a few minutes, mostly loading the 8B model. These are single runs, not evals; the agent evals below in "Known limits" would turn them into repeatable checks.
+
 ## Project layout
 
 ```
 src/store_agent/
   tools.py          business logic, no MCP or HTTP; testable on its own
   mcp_server.py     MCP tools plus the audit wrapper
+  agent.py          a hand-written agent loop: local model (Ollama) + this MCP server
   approvals_api.py  FastAPI service for human decisions
   static/console.html  approver console served at /
   audit.py          hash-chained audit log and verification
@@ -187,7 +211,7 @@ db/schema.sql       tables, constraints, HNSW index
 
 - **Approver identity** is a shared API key plus a name in the request body. A real setup would use SSO/OIDC, so the approver is whoever actually logged in.
 - **The audit chain** catches edits by someone who doesn't rewrite every later row. To catch a full rewrite, the latest hash should be copied periodically somewhere the database admin can't write.
-- **Agent evals:** the evals above score search only. The next layer is scripted agent tasks ("propose a discount with no reason" should be refused, "find vegan protein" should call search before answering), run through `claude -p` and scored on which tools were called and what the final answer says.
+- **Agent evals:** the evals above score search only. The next layer is scripted agent tasks ("propose a discount with no reason" should be refused, "find vegan protein" should call search before answering), run through `claude -p` or `store-agent-chat` and scored on which tools were called and what the final answer says.
 - **Agent-side audit is best effort.** If writing the audit row fails after a tool call, the call still succeeds and the failure is logged, so the agent isn't blocked by an audit outage. The price change request itself is still stored with `requested_by`, and human decisions are already atomic with their audit row. For stricter governance, `request_price_change` and its audit row should commit in one transaction, as approvals do.
 - **Edge deployment:** the MCP server could run on a single in-store box (k3s) against a local Postgres, syncing with the central catalog. There, `potion-multilingual-128M` (0.5 GB, see above) fits better than EmbeddingGemma.
 - **Agent-to-agent:** for example a pricing agent that proposes and a separate checker agent that reviews before a human sees it.

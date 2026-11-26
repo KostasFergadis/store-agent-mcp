@@ -12,15 +12,17 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "psycopg-pool>=3.2",
     "fastembed>=0.4",
+    "httpx>=0.27",
 ]
 
 [project.scripts]
 store-agent-mcp = "store_agent.mcp_server:main"
 store-agent-seed = "store_agent.seed:main"
 store-agent-evals = "store_agent.evals:main"
+store-agent-chat = "store_agent.agent:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "httpx>=0.27"]
+dev = ["pytest>=8"]
 
 [build-system]
 requires = ["hatchling"]
